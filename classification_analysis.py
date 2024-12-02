@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
+from keras.wrappers.scikit_learn import KerasClassifier
 
 from classifier_evaluator import ClassifierEvaluator
 
@@ -110,7 +111,7 @@ class ClassificationAnalysis:
         model = LogisticRegression(random_state=2002)
         lr_cv = GridSearchCV(model, param_grid, cv=5)
         lr_cv.fit(x_train, y_train)
-        print("Tuned DT Parameters: {}".format(
+        print("Tuned logistic Parameters: {}".format(
             lr_cv.best_params_))
         best_model = DecisionTreeClassifier(random_state=2002, **lr_cv.best_params_)
         best_model.fit(x_train, y_train)
@@ -142,7 +143,8 @@ class ClassificationAnalysis:
 
         knn_cv = GridSearchCV(knn, param_grid, cv=5)
         knn_cv.fit(x_train, y_train)
-
+        print("Tuned KNN Parameters: {}".format(
+            knn_cv.best_params_))
         best_model = KNeighborsClassifier(n_neighbors=optimal_k, **knn_cv.best_params_)
         best_model.fit(x_train, y_train)
         y_pred = best_model.predict(x_test)
@@ -161,7 +163,8 @@ class ClassificationAnalysis:
 
         svm_cv = GridSearchCV(svm, param_grid, cv=5)
         svm_cv.fit(x_train, y_train)
-
+        print("Tuned SVM Parameters: {}".format(
+            svm_cv.best_params_))
         best_model = SVC(**svm_cv.best_params_)
         best_model.fit(x_train, y_train)
         y_pred = best_model.predict(x_test)
@@ -206,6 +209,8 @@ class ClassificationAnalysis:
 
         rf_cv = GridSearchCV(rf, param_grid, cv=5)
         rf_cv.fit(x_train, y_train)
+        print("Tuned Random Forest Bagging Parameters: {}".format(
+            rf_cv.best_params_))
 
         best_model = RandomForestClassifier(**rf_cv.best_params_)
         best_model.fit(x_train, y_train)
@@ -237,10 +242,11 @@ class ClassificationAnalysis:
         x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
         x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
 
-        grid_search = GridSearchCV(estimator=clf, param_grid=param_grid, cv=5)
-        grid_search.fit(x_train, y_train)
-
-        best_model = grid_search.best_estimator_
+        rf_cv = GridSearchCV(estimator=clf, param_grid=param_grid, cv=5)
+        rf_cv.fit(x_train, y_train)
+        print("Tuned Random Forest Stacking Parameters: {}".format(
+            rf_cv.best_params_))
+        best_model = rf_cv.best_estimator_
         y_pred = best_model.predict(x_test)
         y_pred_prob = best_model.predict_proba(x_test)[:, 1]
         obj = ClassifierEvaluator()
@@ -262,7 +268,6 @@ class ClassificationAnalysis:
 
         rf_cv = GridSearchCV(rf, param_grid, cv=5)
         rf_cv.fit(x_train, y_train)
-
         base_estimator = RandomForestClassifier(**rf_cv.best_params_)
 
         boost_param_grid = [{'n_estimators':  [80, 90, 100, 110, 120],
@@ -274,6 +279,8 @@ class ClassificationAnalysis:
         boost_rf = AdaBoostClassifier(estimator=base_estimator)
         boost_cv = GridSearchCV(boost_rf, boost_param_grid, cv=5)
         boost_cv.fit(x_train, y_train)
+        print("Tuned Random Forest Boosting Parameters: {}".format(
+            boost_cv.best_params_))
         best_model = AdaBoostClassifier(estimator=base_estimator, **boost_cv.best_params_)
         best_model.fit(x_train, y_train)
         y_pred = best_model.predict(x_test)
@@ -281,25 +288,34 @@ class ClassificationAnalysis:
         obj = ClassifierEvaluator()
         obj.evaluate(y_pred, y_test, y_pred_prob, "Random Forest Boosting")
 
+    def create_keras_model(self, optimizer="adam", activation="relu"):
+        model = keras.Sequential()
+        model.add(layers.Dense(256, activation))
+        model.add(layers.Dense(16, activation))
+        model.add(layers.Dense(8, activation="softmax"))
+        model.compile(optimizer=optimizer,
+                      loss="sparse_categorical_crossentropy",
+                      metrics=["accuracy"])
+        return model
+
     def neural_network(self):
+        params = [{'model__optimizer': ['adam', 'sgd', 'rmsprop'],
+                   'model__activation': ["relu", "tanh"],
+                    'batch_size':[100, 20, 50, 25, 32],
+                    'epochs':[50, 100, 200, 300, 400] }]
         y_train = self.train_df[self.target_feature]
         y_test = self.test_df[self.target_feature]
         x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
         x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
-        model = keras.Sequential()
-        model.add(layers.Dense(256, "relu"))
-        model.add(layers.Dense(16, "relu"))
-        model.add(layers.Dense(8, activation="softmax"))
-        model.compile(optimizer="adam",
-                      loss="sparse_categorical_crossentropy",
-                      metrics=["accuracy"])
-        model.fit(x_train, y_train, epochs=100, batch_size=128, validation_split=0.2)
-        y_pred = np.argmax(model.predict(x_test), axis=1)
-        y_pred_prob = model.predict(x_test)[:, 1]
+
+        km = KerasClassifier(model=self.create_keras_model)
+        nn_cv = GridSearchCV(km, param_grid=params, cv=5)
+        nn_cv.fit(x_train, y_train)
+        best_model = nn_cv.best_estimator_
+        print("Tuned NN Parameters: {}".format(
+            nn_cv.best_params_))
+        best_model.fit(x_train, y_train)
+        y_pred = np.argmax(best_model.predict(x_test), axis=1)
+        y_pred_prob = best_model.predict(x_test)[:, 1]
         obj = ClassifierEvaluator()
         obj.evaluate(y_pred, y_test, y_pred_prob, "Random Forest Boosting")
-        y_pred = model.predict(x_test)
-
-
-        # Multi-layered perceptron
-        pass
