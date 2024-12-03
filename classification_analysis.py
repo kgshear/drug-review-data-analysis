@@ -12,7 +12,10 @@ import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
 from keras.wrappers.scikit_learn import KerasClassifier
+import keras_tuner as kt
+import tensorflow as tf
 
+from EDA import eda
 from classifier_evaluator import ClassifierEvaluator
 
 
@@ -30,27 +33,13 @@ class ClassificationAnalysis:
         self.test_df = pd.read_csv(self.test_filepath, sep=',')
         self.train_df = pd.read_csv(self.train_filepath, sep=',')
 
-    # def kfold_cross_val(self, model):
-    #     data = pd.concat([self.test_df, self.train_df], ignore_index=True)
-    #     y = data[self.target_feature]
-    #     x = data.drop(columns=[self.target_feature])
-    #     skf = StratifiedKFold(n_splits=5)
-    #     best_indexes = []
-    #     best_accuracy = 0
-    #     for train_index, test_index in skf.split(x,y):
-    #         X_train, X_test = x[train_index], x[test_index]
-    #         y_train, y_test = y[train_index], y[test_index]
-    #         new_model = model(random_state=2002)
-    #         new_model.fit(X_train, y_train)
-    #         y_pred = model.predict(X_test)
-    #         accuracy = accuracy_score(y_test, y_pred)
-    #         if accuracy > best_accuracy:
-    #             best_accuracy = accuracy
-    #             best_indexes = [train_index, test_index]
-    #     return best_indexes[0], best_indexes[1]
+    def get_pca(self):
+        obj = eda()
+        obj.pca(self)
+        return None
 
-    def decision_tree(self):
-        param_grid = [{'max_depth': [1, 2, 3, 4, 5],
+    def decision_tree_preprune(self):
+        param_grid = [{'max_depth': [1, 2, 3, 4, 5, 10, 15, 20],
                        'min_samples_split': [20, 30, 40],
                        'min_samples_leaf': [10, 20, 30],
                        'criterion': ['gini', 'entropy', 'log_loss'],
@@ -67,8 +56,41 @@ class ClassificationAnalysis:
         print("Tuned DT Parameters: {}".format(
             dt_cv.best_params_))
 
+        best_model = DecisionTreeClassifier(random_state=5805, **dt_cv.best_params_)
+        best_model.fit(x_train, y_train)
+        train_accuracy = accuracy_score(y_train, best_model.predict(x_train))
+        test_accuracy = accuracy_score(y_test, best_model.predict(x_test))
+
+        print(f"The train accuracy is {train_accuracy:.2f}")
+        print(f"The test accuracy is {test_accuracy:.2f}")
+        plt.figure(figsize=(16, 16))
+        plot_tree(best_model, feature_names=x_train.columns, filled=True,
+                  fontsize=14)
+        plt.show()
+        y_pred = best_model.predict(x_test)
+        y_pred_prob = model.predict_proba(x_test)[:, 1]
+        obj = ClassifierEvaluator()
+        obj.evaluate(y_pred,y_test,y_pred_prob,"Pre-Pruned Decision Tree")
+
+    def decision_tree_postprune(self):
+
+        y_train = self.train_df[self.target_feature]
+        y_test = self.test_df[self.target_feature]
+        x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
+        x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
+
+        model = DecisionTreeClassifier(random_state=2002)
         path = model.cost_complexity_pruning_path(x_train, y_train)
         alphas = path.ccp_alphas
+        param_grid = [{'criterion': ['gini', 'entropy', 'log_loss'],
+                       'splitter': ['best', 'random'],
+                       'max_features': ['sqrt', 'log2'],
+                       'ccp_alpha': alphas}]
+        dt_cv = GridSearchCV(model, param_grid, cv=5)
+        dt_cv.fit(x_train, y_train)
+        print("Tuned DT Parameters: {}".format(
+            dt_cv.best_params_))
+
         train_scores = []
         test_scores = []
 
@@ -96,7 +118,7 @@ class ClassificationAnalysis:
         y_pred = best_model.predict(x_test)
         y_pred_prob = model.predict_proba(x_test)[:, 1]
         obj = ClassifierEvaluator()
-        obj.evaluate(y_pred,y_test,y_pred_prob,"Decision Tree")
+        obj.evaluate(y_pred,y_test,y_pred_prob,"Post-Pruned Decision Tree")
 
     def logistic_regression(self):
         param_grid = [{'max_iter': [80, 90, 100, 110, 120],
@@ -288,34 +310,50 @@ class ClassificationAnalysis:
         obj = ClassifierEvaluator()
         obj.evaluate(y_pred, y_test, y_pred_prob, "Random Forest Boosting")
 
-    def create_keras_model(self, optimizer="adam", activation="relu"):
+    def create_keras_model(self, hp):
         model = keras.Sequential()
-        model.add(layers.Dense(256, activation))
-        model.add(layers.Dense(16, activation))
+        hp_units1 = hp.Int('units_1', min_value=256, max_value=512, step=32)
+        model.add(layers.Dense(units=hp_units1, activation='relu'))
+        hp_units2 = hp.Int('units_2', min_value=16, max_value=256, step=32)
+        model.add(layers.Dense(units=hp_units2, activation='relu'))
         model.add(layers.Dense(8, activation="softmax"))
-        model.compile(optimizer=optimizer,
+        hp_learning_rate = hp.Choice('learning_rate', values=[0.5, 0.1, .001, .0001, .000001, .0000001])
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=hp_learning_rate),
                       loss="sparse_categorical_crossentropy",
                       metrics=["accuracy"])
         return model
 
     def neural_network(self):
-        params = [{'model__optimizer': ['adam', 'sgd', 'rmsprop'],
-                   'model__activation': ["relu", "tanh"],
-                    'batch_size':[100, 20, 50, 25, 32],
-                    'epochs':[50, 100, 200, 300, 400] }]
-        y_train = self.train_df[self.target_feature]
-        y_test = self.test_df[self.target_feature]
-        x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
-        x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
+        y_train = self.train_df[self.target_feature].to_numpy()
+        y_test = self.test_df[self.target_feature].to_numpy()
+        x_train = self.train_df.drop(columns=[self.target_feature], inplace=False).to_numpy()
+        x_test = self.test_df.drop(columns=[self.target_feature], inplace=False).to_numpy()
 
-        km = KerasClassifier(model=self.create_keras_model)
-        nn_cv = GridSearchCV(km, param_grid=params, cv=5)
-        nn_cv.fit(x_train, y_train)
-        best_model = nn_cv.best_estimator_
-        print("Tuned NN Parameters: {}".format(
-            nn_cv.best_params_))
-        best_model.fit(x_train, y_train)
+        tuner = kt.Hyperband(self.create_keras_model, objective='val_accuracy', max_epochs=10)
+        early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+        tuner.search(x_train,y_train, epochs=50, validation_split=0.2, callbacks=[early_stop])
+
+        best_param = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        print(f"For the Neural Network, the best amount of units for the first dense layer is {best_param.get('units_1')}, "
+              f"the second is {best_param.get('units_2')}, and the best learning rate is {best_param.get('learning_rate')}")
+        best_model = tuner.hypermodel.build(best_param)
+        model_history = best_model.fit(x_train, y_train, epochs=15, validation_split=0.2)
+        val_per_epoch = model_history.history['val_accuracy']
+        optimal_epochs = val_per_epoch.index(max(val_per_epoch)) + 1
+        print(f"Optimal number of epochs is {optimal_epochs}")
+
+        optimal_model = tuner.hypermodel.build(best_param)
+        optimal_model.fit(x_train, y_train, epochs=optimal_epochs, validation_split=0.2)
         y_pred = np.argmax(best_model.predict(x_test), axis=1)
         y_pred_prob = best_model.predict(x_test)[:, 1]
         obj = ClassifierEvaluator()
-        obj.evaluate(y_pred, y_test, y_pred_prob, "Random Forest Boosting")
+        obj.evaluate(y_pred, y_test, y_pred_prob, "Neural Network")
+
+if __name__ == "__main__":
+    # nltk.download('omw-1.4')
+    # nltk.download('wordnet')
+    # nltk.download('vader_lexicon')
+    obj = eda()
+    # obj.random_forest("rating")
+
