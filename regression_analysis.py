@@ -63,7 +63,7 @@ class RegressionAnalysis():
         for val in t_stats.index:
             t_val = t_stats[val]
             p_val = p_values[val]
-            if p_val > sig:
+            if p_val < sig:
                 isRejected="No"
             else:
                 isRejected="Yes"

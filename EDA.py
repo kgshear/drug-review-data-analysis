@@ -2,8 +2,9 @@ import gensim
 import nltk
 import pandas as pd
 import numpy as np
+from gensim.utils import simple_preprocess
 from imblearn.combine import SMOTEENN
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, RandomOverSampler
 from nltk.corpus import stopwords
 # from nltk.corpus import wordnet
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
@@ -34,8 +35,8 @@ class eda:
     data = None
     stopwords = stopwords.words('english')
     target_feature = "condition"
-    train_filepath = "data/processed/train_data_processed.csv"
-    test_filepath = "data/processed/test_data_processed.csv"
+    train_filepath = "data/processed/train_data_processed_2.csv"
+    test_filepath = "data/processed/test_data_processed_2.csv"
     train_filepath_filtered = "data/filtered/train_data_filtered_condition_pca.csv"
     test_filepath_filtered = "data/filtered/test_data_filtered_condition_pca.csv"
     small_filepath = "data/test/small_file_test_processed.csv"
@@ -49,29 +50,39 @@ class eda:
         # for word in not_stopwords:
         #     self.stopwords.remove(word)
         # self.get_raw_data()
-
+        # print(self.data.nunique())
         # self.clean_data(self.data)
+        # x_train, x_test, y_train, y_test = train_test_split(self.data.drop(columns=[self.target_feature], inplace=False),
+        #                                                    self.data[self.target_feature], test_size=0.2,
+        #                                                    random_state=2002)
+        #
+        # self.train_df = x_train.copy()
+        # self.train_df[self.target_feature] = y_train
+        # self.test_df = x_test.copy()
+        # self.test_df[self.target_feature] = y_test
+        # print("Size of training", len(self.train_df))
+        # print("Size of data", len(self.data))
+        # print("Size of test", len(self.test_df))
+
         # self.feature_engineering(self.test_df, self.test_filepath)
         # self.clean_data(self.train_df)
         # self.feature_engineering(self.train_df, self.train_filepath)
-        self.get_processed_data()
+
         # self.get_filtered_data()
         # self.correlation_pearson(self.train_df, self.target_feature)
         # self.covariance_matrix(self.train_df, self.target_feature)
         # self.balance_data(self.train_df, self.target_feature)
-        self.data = self.simplify_rating(self.data)
-
-        data_text = self.vectorize_text(self.data)
-        self.data = pd.concat([self.data, data_text], axis=1,
+        #*
+        self.get_processed_data()
+        # self.data = self.simplify_rating(self.data)
+        train_text, test_text = self.vectorize_text()
+        self.train_df = pd.concat([self.train_df, train_text], axis=1,
                                  ignore_index=False)
-        x_train, x_test, y_train, y_test = train_test_split(self.data.drop(columns=[self.target_feature], inplace=False),
-                                                            self.data[self.target_feature], test_size=0.2, random_state=2002)
-        self.train_df = x_train.copy()
-        self.train_df[self.target_feature] = y_train
-        self.test_df = x_test.copy()
-        self.test_df[self.target_feature] = y_test
+        self.test_df = pd.concat([self.test_df, test_text], axis=1,
+                                  ignore_index=False)
         self.test_df = self.test_df.drop(columns=["review", "id", "usefulCount", "sentiment"])
         self.train_df = self.train_df.drop(columns=["review", "id", "usefulCount", "sentiment"])
+    #*
         # self.train_df = pd.concat([self.train_df[[self.train_df.columns]], train_text[[train_text.columns]]], ignore_index=True)
         # test_text = self.vectorize_text(self.test_df)
         # self.test_df = self.vectorize_text(self.test_df)
@@ -79,11 +90,14 @@ class eda:
 #     self.test_df[["rating", "sentiment"]],
 #     self.train_df[["rating", "sentiment"]]
 # ], ignore_index=True))
-        self.anomaly_detection(self.train_df)
+        # *
+        self.train_df = self.anomaly_detection(self.train_df)
         self.train_df = self.balance_data(self.train_df)
         self.dimensionality_reduction()
         self.correlation_pearson(self.train_df, self.target_feature)
         self.covariance_matrix(self.train_df, self.target_feature)
+        self.save_filtered_data()
+        # *
 
 
 #         self.anomaly_detection(self.train_df)
@@ -94,12 +108,15 @@ class eda:
     def get_raw_data(self):
         self.test_df = pd.read_csv('data/raw/drugsComTest_raw.tsv', sep='\t')
         self.train_df = pd.read_csv('data/raw/drugsComTrain_raw.tsv', sep='\t')
+        self.data = pd.concat([self.test_df, self.train_df], ignore_index=True)
         # self.small_df = pd.read_csv('data/test/small_file_test_raw.tsv', sep='\t')
 
     def get_processed_data(self):
         print("getting data")
         self.test_df = pd.read_csv(self.test_filepath, sep=',')
+        self.test_df =self.test_df.dropna()
         self.train_df = pd.read_csv(self.train_filepath, sep=',')
+        self.test_df = self.test_df.dropna()
         self.data = pd.concat([self.test_df, self.train_df], ignore_index=True)
         # self.small_df = pd.read_csv('data/test/small_file_test_processed.csv', sep=',')
 
@@ -219,13 +236,8 @@ class eda:
         print(f"There were {len(remaining_na_rows)} na rows after dealing with na conditions by matching text")
         df.dropna(inplace=True)
         df.drop_duplicates(subset="review")
-
-        print(f"There were {len(df)} rows before filtering out conditions and drugs that occur 10 times")
-        df.groupby('condition').filter(lambda x : len(x)>1)
-        df.groupby('drugName').filter(lambda x: len(x)>1)
         # df_condition = df.groupby(['condition'])['drugName'].nunique().sort_values(ascending=False)
         # df_condition = pd.DataFrame(df_condition).reset_index()
-        print(f"There were {len(df)} rows after filtering out conditions and drugs that occur 10 times")
 
     def feature_engineering(self, df, filepath):
         # encoding
@@ -260,43 +272,38 @@ class eda:
         y_train = self.train_df[self.target_feature]
         x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
         y_test = self.test_df[self.target_feature]
-        vif_features_to_remove = self.vif(x_train)
+        # vif_features_to_remove = self.vif(x_train)
         rf_features_to_remove = self.random_forest(x_train, y_train) # we don't want to remove everything
         # features_to_remove = vif_features_to_remove.append(rf_features_to_remove).drop_duplicates()
         # x_train.drop(columns=[*features_to_remove])
-        self.train_df = self.train_df.drop(columns=[*vif_features_to_remove])
-        self.test_df = self.test_df.drop(columns=[*vif_features_to_remove])
-        x_train = self.pca(x_train)
+        self.train_df = self.train_df.drop(columns=[*rf_features_to_remove])
+        self.test_df = self.test_df.drop(columns=[*rf_features_to_remove])
+
+        x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
+        y_train = self.train_df[self.target_feature]
+        x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
+        y_test = self.test_df[self.target_feature]
+        x_train, x_test = self.pca(x_train, x_test)
         x_train[self.target_feature] = y_train
         self.train_df = x_train
-        x_test = self.pca(x_test)
         x_test[self.target_feature] = y_test
         self.test_df = x_test
 
-    def vectorize_text(self, df):
-        # bag of words
-        lemmatizer = WordNetLemmatizer()
-
-        reviews = df["review"].apply(lambda x: ''.join([lemmatizer.lemmatize(word) for word in str(x).split()]))
+    def vectorize_text(self):
+        # bag of words ish
+        reviews = self.data["review"].apply(lambda sentence: sentence.split())
         model = gensim.models.Word2Vec(sentences=reviews, min_count=1, vector_size=50, window=5)
         wv = model.wv
 
-        embeddings = reviews.apply(lambda x: np.mean([wv[word] for word in x if word in wv], axis=0))
-        embedding_df = pd.DataFrame(
-            embeddings.to_list(), columns=[f"emb{i+1}" for i in range(model.vector_size)])
-        return embedding_df
-
-        # vectorizer = CountVectorizer(stop_words=stopwords.words('english'), binary=True)
-        # review_array = vectorizer.fit_transform(reviews)
-        # review_df = pd.DataFrame(review_array.toarray(), columns=vectorizer.get_feature_names_out())
-        # return review_df
-    def simplify_rating(self, df):
-        ratings = [df["rating"] < 4,
-                   (df["rating"] >= 4) & (df["rating"] <= 7),
-                   df["rating"] > 7]
-        labels = [0, 1, 2]
-        df["rating"] = np.select(ratings, labels)
-        return df
+        train_reviews = self.train_df["review"].apply(lambda sentence: sentence.split())
+        test_reviews = self.test_df["review"].apply(lambda sentence: sentence.split())
+        train_embeddings = train_reviews.apply(lambda x: np.mean([wv[word] for word in x if word in wv], axis=0))
+        train_embedding_df = pd.DataFrame(
+            train_embeddings.to_list(), columns=[f"emb{i+1}" for i in range(model.vector_size)])
+        test_embeddings = test_reviews.apply(lambda x: np.mean([wv[word] for word in x if word in wv], axis=0))
+        test_embedding_df = pd.DataFrame(
+            test_embeddings.to_list(), columns=[f"emb{i + 1}" for i in range(model.vector_size)])
+        return train_embedding_df, test_embedding_df
 
     def random_forest(self, dfx, dfy):
         print("Started random forest")
@@ -330,16 +337,29 @@ class eda:
         print("Eliminated Features: ", features_to_remove)
         return features_to_remove
 
-    def pca(self, df):
+    def pca(self, train, test):
         pca = PCA()
-        data_copy = pd.DataFrame(StandardScaler().fit_transform(df), columns=df.columns)
-        features_pca = pd.DataFrame(pca.fit_transform(data_copy))
+        scaler = StandardScaler()
+        scaler.fit(train)
+        train_scaled = scaler.transform(train)
+        test_scaled = scaler.transform(test)
+        pca = PCA()
+        pca.fit(train_scaled)
+        train_pca = pca.transform(train_scaled)
+        test_pca = pca.transform(test_scaled)
+        col_names = [f"PCA{i + 1}" for i in range(train.shape[1])]
+        train_df = pd.DataFrame(train_pca, columns=col_names, index=train.index)
+        test_df = pd.DataFrame(test_pca, columns=col_names, index=test.index)
         explained_variance_ratio = pca.explained_variance_ratio_
         cumvar = np.cumsum(explained_variance_ratio)
         n_com = np.argmax(cumvar >= 0.95) + 1
         n_com_95 = np.argmin(abs(cumvar - 0.95)) + 1
 
         print(f"Number of components needed to explain more than 95% of the variance: {n_com}")
+        cov_matrix = np.cov(train_scaled, rowvar=False)
+        condition_num = np.linalg.cond(cov_matrix)
+        print(f"Condition num: {condition_num}")
+
         plt.plot(range(1, len(cumvar) + 1), cumvar)
         plt.axhline(y=0.95, color='r', linestyle='-')
         plt.axvline(x=n_com_95, color='r', linestyle='-')
@@ -348,7 +368,7 @@ class eda:
         plt.ylabel('Variance')
         plt.grid(True)
         plt.show()
-        return features_pca
+        return train_df, test_df
 
     def singular_value_decomp(self, df, column_name):
         df = df.drop(columns=[column_name, "review", "id", "sentiment", "usefulCount"], inplace=False)
@@ -401,32 +421,47 @@ class eda:
     def balance_data(self, df):
         conditions = df["condition"].value_counts().sort_values(ascending=False)[:10]
         conditions.plot(kind='bar')
-        plt.title('Most Common Conditions')
+        plt.title('Top 10 Conditions Before Balancing')
         plt.xlabel("Condition")
         plt.ylabel("Count")
+        plt.grid(True)
+        plt.xticks(rotation=35)
         plt.show()
-        # for item in value_list:
-        #     print(f"Number of rows before removing unique {item}: ", len(df))
-        #     value_counts = df[item].value_counts()
-        #     df = df[df[item].isin(value_counts[value_counts > 5].index)]
-        #     print(f"Number of rows after removing unique {item}: ", len(df))
+
         value_counts = df[self.target_feature].value_counts()
-        need_undersampling = df[df[self.target_feature].isin(value_counts[value_counts >= 3000].index)]
-        need_oversampling = df[df[self.target_feature].isin(value_counts[value_counts < 3000].index)]
+        too_small_for_smote = df[df[self.target_feature].isin(value_counts[value_counts < 8].index)]
+        oversampler = RandomOverSampler(sampling_strategy='auto', random_state=2002)
+        x_over, y_over = oversampler.fit_resample(too_small_for_smote.drop(columns=[self.target_feature], inplace=False), too_small_for_smote[self.target_feature])
+        x_over[self.target_feature] = y_over
+        print("over x value counts", x_over[self.target_feature].value_counts())
+        df = pd.concat([x_over, df])
+
+        need_undersampling = df[df[self.target_feature].isin(value_counts[value_counts >= 500].index)]
+        need_oversampling = df[df[self.target_feature].isin(value_counts[value_counts < 500].index)]
         print("Number of rows before resampling: ", len(df))
-        undersampler = RandomUnderSampler(random_state=2002)
-        under_x, under_y = undersampler.fit_resample(need_undersampling.drop(columns=[self.target_feature], inplace=False), need_undersampling[self.target_feature])
+        value_dict = {}
+        under_value_count = need_undersampling[self.target_feature].value_counts().sort_values(ascending=False)[:2]
+        for idx in under_value_count.index:
+            value_dict[idx] = int(under_value_count[idx] * .1 + 4500)
+
+        undersampler = RandomUnderSampler(random_state=2002, sampling_strategy=value_dict)
+        under_x, under_y = undersampler.fit_resample(
+            need_undersampling.drop(columns=[self.target_feature], inplace=False),
+            need_undersampling[self.target_feature])
         under_x[self.target_feature] = under_y
+        print("under x value counts", under_x[self.target_feature].value_counts())
         oversampler = SMOTE(k_neighbors=2)
         over_x, over_y = oversampler.fit_resample(need_oversampling.drop(columns=[self.target_feature], inplace=False), need_oversampling[self.target_feature])
         over_x[self.target_feature] = over_y
-        new_df =  pd.concat([under_x, over_x])
+        new_df = pd.concat([under_x, over_x])
+        print("over x value counts", over_x[self.target_feature].value_counts())
         print("Number of rows after resampling: ", len(new_df))
 
         plt.figure(figsize=(10, 5))
         pd.Series(new_df[self.target_feature]).value_counts()[:10].plot(kind='bar', color=['blue', 'orange'])
-        plt.title('Balanced Dataset (10 Conditions)')
+        plt.title('Top 10 Conditions After Balancing')
         plt.xlabel('Condition')
+        plt.xticks(rotation=35)
         plt.ylabel('Count')
         plt.grid(True)
         plt.show()
@@ -437,12 +472,11 @@ class eda:
         labels = model.fit_predict(MinMaxScaler().fit_transform(df))
         df["Cluster"] = labels
         filtered_df = self.train_df[df["Cluster"] != -1]
-
         print(f"Original shape: {df.shape}")
 
-        self.train_df = filtered_df
+        filtered_df.drop(columns=["Cluster"])
         print(f"Filtered shape: {self.train_df.shape}")
-
+        return filtered_df
 
 
 if __name__ == "__main__":
@@ -451,6 +485,8 @@ if __name__ == "__main__":
     # nltk.download('vader_lexicon')
     obj = eda()
     # 50 for dims
-    # TODO anamoly, resample, vif, random forest, pca, covar, corr
+    # TODO after data is done processing do anamoly, resample, vif, random forest, pca, covar, corr
+    # TODO regression
+    # TODO classifiers
     # obj.random_forest("rating")
 
