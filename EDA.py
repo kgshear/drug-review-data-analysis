@@ -2,11 +2,8 @@ import gensim
 import nltk
 import pandas as pd
 import numpy as np
-from gensim.utils import simple_preprocess
-from imblearn.combine import SMOTEENN
-from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.over_sampling import SMOTE
 from nltk.corpus import stopwords
-# from nltk.corpus import wordnet
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.stem import WordNetLemmatizer
 from prettytable import PrettyTable
@@ -15,9 +12,7 @@ import string
 import re
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.metrics import confusion_matrix
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import seaborn as sb
@@ -25,100 +20,67 @@ from transformers import pipeline
 from sklearn.model_selection import train_test_split
 from transformers.pipelines.pt_utils import KeyDataset
 from datasets import Dataset
-from sklearn.metrics import silhouette_samples, silhouette_score
-from sklearn.cluster import KMeans
 import hdbscan
-from imblearn.under_sampling import RandomUnderSampler
 
 
 class eda:
     data = None
     stopwords = stopwords.words('english')
-    target_feature = "condition"
+    target_feature = "rating"
     train_filepath = "data/processed/train_data_processed_2.csv"
     test_filepath = "data/processed/test_data_processed_2.csv"
-    train_filepath_filtered = "data/filtered/train_data_filtered_condition_pca.csv"
-    test_filepath_filtered = "data/filtered/test_data_filtered_condition_pca.csv"
-    small_filepath = "data/test/small_file_test_processed.csv"
+    train_filepath_filtered = "data/filtered/train_data_filtered_useful.csv"
+    test_filepath_filtered = "data/filtered/test_data_filtered_useful.csv"
     model_path = f"cardiffnlp/twitter-roberta-base-sentiment-latest"
     sentiment_task = pipeline("sentiment-analysis", model=model_path, tokenizer=model_path, truncation=True,
                               max_length=512,   batch_size=4)
 
     def __init__(self):
-        # not_stopwords = ["me", "not", "didn't", "no", "wouldn't", "couldn't", "wasn't", "shouldn't", "won't",
-        #                  "aren't", "haven't", "isn't", "weren't"]
-        # for word in not_stopwords:
-        #     self.stopwords.remove(word)
-        # self.get_raw_data()
-        # print(self.data.nunique())
-        # self.clean_data(self.data)
-        # x_train, x_test, y_train, y_test = train_test_split(self.data.drop(columns=[self.target_feature], inplace=False),
-        #                                                    self.data[self.target_feature], test_size=0.2,
-        #                                                    random_state=2002)
-        #
-        # self.train_df = x_train.copy()
-        # self.train_df[self.target_feature] = y_train
-        # self.test_df = x_test.copy()
-        # self.test_df[self.target_feature] = y_test
-        # print("Size of training", len(self.train_df))
-        # print("Size of data", len(self.data))
-        # print("Size of test", len(self.test_df))
 
-        # self.feature_engineering(self.test_df, self.test_filepath)
-        # self.clean_data(self.train_df)
-        # self.feature_engineering(self.train_df, self.train_filepath)
+        self.get_raw_data()
+        self.clean_data(self.data)
+        x_train, x_test, y_train, y_test = train_test_split(self.data.drop(columns=[self.target_feature], inplace=False),
+                                                           self.data[self.target_feature], test_size=0.2,
+                                                           random_state=2002)
+        self.train_df = x_train.copy()
+        self.train_df[self.target_feature] = y_train
+        self.test_df = x_test.copy()
+        self.test_df[self.target_feature] = y_test
 
-        # self.get_filtered_data()
-        # self.correlation_pearson(self.train_df, self.target_feature)
-        # self.covariance_matrix(self.train_df, self.target_feature)
-        # self.balance_data(self.train_df, self.target_feature)
-        #*
+
+        self.feature_engineering(self.test_df, self.test_filepath)
+        self.feature_engineering(self.train_df, self.train_filepath)
+
         self.get_processed_data()
-        # self.data = self.simplify_rating(self.data)
-        train_text, test_text = self.vectorize_text()
-        self.train_df = pd.concat([self.train_df, train_text], axis=1,
-                                 ignore_index=False)
-        self.test_df = pd.concat([self.test_df, test_text], axis=1,
-                                  ignore_index=False)
-        self.test_df = self.test_df.drop(columns=["review", "id", "usefulCount", "sentiment"])
-        self.train_df = self.train_df.drop(columns=["review", "id", "usefulCount", "sentiment"])
-    #*
-        # self.train_df = pd.concat([self.train_df[[self.train_df.columns]], train_text[[train_text.columns]]], ignore_index=True)
-        # test_text = self.vectorize_text(self.test_df)
-        # self.test_df = self.vectorize_text(self.test_df)
-#         self.test_sentiment_analysis(pd.concat([
-#     self.test_df[["rating", "sentiment"]],
-#     self.train_df[["rating", "sentiment"]]
-# ], ignore_index=True))
-        # *
+
+        self.test_df["usefulStandardized"] = self.standardization(self.test_df["usefulCount"])
+        self.train_df["usefulStandardized"] = self.standardization(self.train_df["usefulCount"])
+        self.test_df = self.test_df.drop(columns=["review", "id", "usefulCount", "sentiment", "reviewQuality"])
+        self.train_df = self.train_df.drop(columns=["review", "id", "sentiment", "usefulCount", "reviewQuality"])
+
         self.train_df = self.anomaly_detection(self.train_df)
+        self.test_df["rating"] = self.simplify_rating(self.test_df)
+        self.train_df["rating"] = self.simplify_rating(self.train_df)
+        self.train_df = self.train_df.drop(columns=["Cluster"], inplace=False)
         self.train_df = self.balance_data(self.train_df)
+
         self.dimensionality_reduction()
         self.correlation_pearson(self.train_df, self.target_feature)
         self.covariance_matrix(self.train_df, self.target_feature)
         self.save_filtered_data()
-        # *
-
-
-#         self.anomaly_detection(self.train_df)
-        self.save_filtered_data()
-#         self.balance_data(self.train_df, "condition")
-
 
     def get_raw_data(self):
         self.test_df = pd.read_csv('data/raw/drugsComTest_raw.tsv', sep='\t')
         self.train_df = pd.read_csv('data/raw/drugsComTrain_raw.tsv', sep='\t')
         self.data = pd.concat([self.test_df, self.train_df], ignore_index=True)
-        # self.small_df = pd.read_csv('data/test/small_file_test_raw.tsv', sep='\t')
+
 
     def get_processed_data(self):
         print("getting data")
         self.test_df = pd.read_csv(self.test_filepath, sep=',')
         self.test_df =self.test_df.dropna()
         self.train_df = pd.read_csv(self.train_filepath, sep=',')
-        self.test_df = self.test_df.dropna()
         self.data = pd.concat([self.test_df, self.train_df], ignore_index=True)
-        # self.small_df = pd.read_csv('data/test/small_file_test_processed.csv', sep=',')
 
     def get_filtered_data(self):
         print("getting data")
@@ -126,9 +88,6 @@ class eda:
         self.train_df = pd.read_csv(self.train_filepath_filtered, sep=',')
         self.data = pd.concat([self.test_df, self.train_df], ignore_index=True)
 
-    # def add_column(self):
-    #     self.test_df["nlkt_sentiment"] = self.test_df["review"].apply(self.sentiment_analysis_nlkt)
-    #     self.train_df["nlkt_sentiment"] = self.train_df["review"].apply(self.sentiment_analysis_nlkt)
     def save_filtered_data(self):
         self.test_df.to_csv(self.test_filepath_filtered, index=False)
         self.train_df.to_csv(self.train_filepath_filtered, index=False)
@@ -145,8 +104,6 @@ class eda:
             punctuation = string.punctuation + '\n' + '\t'
             text = text.replace('039', '\'')
             words = text.split()
-            # lemmatizer = WordNetLemmatizer()
-            # words = [lemmatizer.lemmatize(word) for word in words]
             clean_text = " ".join([word for word in words if word.lower()])
             for char in punctuation:
                 table = str.maketrans(" ", " ", char)
@@ -158,16 +115,16 @@ class eda:
         return new_df
 
     def clean_text(self, text):
-        if text != text:
-            # check if nan
-            return text
-        else:
-            text = text.lower()
-            punctuation = string.punctuation + '\n' + '\t'
-            for char in punctuation:
-                table = str.maketrans(" ", " ", char)
-                text = text.translate(table)
-            return text
+            if text != text:
+                # check if nan
+                return text
+            else:
+                text = text.lower()
+                punctuation = string.punctuation + '\n' + '\t'
+                for char in punctuation:
+                    table = str.maketrans(" ", " ", char)
+                    text = text.translate(table)
+                return text
 
     def sentiment_analysis_nlkt(self, text):
         text = str(text)
@@ -205,7 +162,12 @@ class eda:
         print(sizes)
         ax.pie(sizes, labels=["Negative", "Neutral", "Positive"])
         plt.show()
-
+    def simplify_rating(self, df):
+        ratings = [df["rating"] < 6,
+                   df["rating"] > 5]
+        labels = [0, 1]
+        true_labels = np.select(ratings, labels)
+        return true_labels
     def clean_data(self, df):
         df.loc[df['condition'].str.contains("users found this comment helpful", na=False), 'condition'] = np.nan
         df['word_count'] = df["review"].apply(lambda x: len(str(x).split()))
@@ -268,31 +230,27 @@ class eda:
 
     def dimensionality_reduction(self):
         # compare methods of reducing dimensionality vif, random forest, anamoly detection, pca, covar, corr, resample
-        x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
-        y_train = self.train_df[self.target_feature]
-        x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
-        y_test = self.test_df[self.target_feature]
-        # vif_features_to_remove = self.vif(x_train)
-        rf_features_to_remove = self.random_forest(x_train, y_train) # we don't want to remove everything
-        # features_to_remove = vif_features_to_remove.append(rf_features_to_remove).drop_duplicates()
-        # x_train.drop(columns=[*features_to_remove])
-        self.train_df = self.train_df.drop(columns=[*rf_features_to_remove])
-        self.test_df = self.test_df.drop(columns=[*rf_features_to_remove])
 
         x_train = self.train_df.drop(columns=[self.target_feature], inplace=False)
         y_train = self.train_df[self.target_feature]
         x_test = self.test_df.drop(columns=[self.target_feature], inplace=False)
         y_test = self.test_df[self.target_feature]
-        x_train, x_test = self.pca(x_train, x_test)
+        # x_train, x_test = self.pca(x_train, x_test)
+        vif_features_to_remove = self.vif(x_train)
+        rf_features_to_remove = self.random_forest(x_train, y_train)  # we don't want to remove everything
         x_train[self.target_feature] = y_train
         self.train_df = x_train
         x_test[self.target_feature] = y_test
         self.test_df = x_test
+        if len(rf_features_to_remove) > 0:
+            self.train_df = self.train_df.drop(columns=[*rf_features_to_remove])
+            self.test_df = self.test_df.drop(columns=[*rf_features_to_remove])
+
 
     def vectorize_text(self):
         # bag of words ish
         reviews = self.data["review"].apply(lambda sentence: sentence.split())
-        model = gensim.models.Word2Vec(sentences=reviews, min_count=1, vector_size=50, window=5)
+        model = gensim.models.Word2Vec(sentences=reviews, min_count=1, vector_size=25, window=5)
         wv = model.wv
 
         train_reviews = self.train_df["review"].apply(lambda sentence: sentence.split())
@@ -338,16 +296,19 @@ class eda:
         return features_to_remove
 
     def pca(self, train, test):
-        pca = PCA()
+        useful_test = test["usefulStandardized"]
+        useful_train = train["usefulStandardized"]
+        test.drop(columns=["usefulStandardized"])
+        train.drop(columns=["usefulStandardized"])
         scaler = StandardScaler()
         scaler.fit(train)
         train_scaled = scaler.transform(train)
         test_scaled = scaler.transform(test)
-        pca = PCA()
+        pca = PCA(n_components=0.95)
         pca.fit(train_scaled)
         train_pca = pca.transform(train_scaled)
         test_pca = pca.transform(test_scaled)
-        col_names = [f"PCA{i + 1}" for i in range(train.shape[1])]
+        col_names = [f"PCA{i + 1}" for i in range(train_pca.shape[1])]
         train_df = pd.DataFrame(train_pca, columns=col_names, index=train.index)
         test_df = pd.DataFrame(test_pca, columns=col_names, index=test.index)
         explained_variance_ratio = pca.explained_variance_ratio_
@@ -368,6 +329,9 @@ class eda:
         plt.ylabel('Variance')
         plt.grid(True)
         plt.show()
+        #
+        train_df["usefulStandardized"] = useful_train
+        test_df["usefulStandardized"] = useful_test
         return train_df, test_df
 
     def singular_value_decomp(self, df, column_name):
@@ -402,10 +366,7 @@ class eda:
         return features_to_elim
 
     def covariance_matrix(self, df, column_name):
-        # x = df.drop(columns=[column_name], inplace=False)
-        # y = df[column_name]
-        # data = pd.concat([x, y], axis=1)
-        # print(df.dtypes)
+
         df = df.drop(columns=[self.target_feature], inplace=False)
         cov_matrix = df.cov()
         sb.heatmap(cov_matrix, cmap="YlGnBu", annot=True)
@@ -419,53 +380,29 @@ class eda:
         plt.show()
 
     def balance_data(self, df):
-        conditions = df["condition"].value_counts().sort_values(ascending=False)[:10]
+        conditions = df["rating"].value_counts().sort_values(ascending=False)
         conditions.plot(kind='bar')
-        plt.title('Top 10 Conditions Before Balancing')
-        plt.xlabel("Condition")
+        plt.title('Rating Before Balancing')
+        plt.xlabel("Rating")
         plt.ylabel("Count")
         plt.grid(True)
-        plt.xticks(rotation=35)
-        plt.show()
 
-        value_counts = df[self.target_feature].value_counts()
-        too_small_for_smote = df[df[self.target_feature].isin(value_counts[value_counts < 8].index)]
-        oversampler = RandomOverSampler(sampling_strategy='auto', random_state=2002)
-        x_over, y_over = oversampler.fit_resample(too_small_for_smote.drop(columns=[self.target_feature], inplace=False), too_small_for_smote[self.target_feature])
-        x_over[self.target_feature] = y_over
-        print("over x value counts", x_over[self.target_feature].value_counts())
-        df = pd.concat([x_over, df])
-
-        need_undersampling = df[df[self.target_feature].isin(value_counts[value_counts >= 500].index)]
-        need_oversampling = df[df[self.target_feature].isin(value_counts[value_counts < 500].index)]
-        print("Number of rows before resampling: ", len(df))
-        value_dict = {}
-        under_value_count = need_undersampling[self.target_feature].value_counts().sort_values(ascending=False)[:2]
-        for idx in under_value_count.index:
-            value_dict[idx] = int(under_value_count[idx] * .1 + 4500)
-
-        undersampler = RandomUnderSampler(random_state=2002, sampling_strategy=value_dict)
-        under_x, under_y = undersampler.fit_resample(
-            need_undersampling.drop(columns=[self.target_feature], inplace=False),
-            need_undersampling[self.target_feature])
-        under_x[self.target_feature] = under_y
-        print("under x value counts", under_x[self.target_feature].value_counts())
         oversampler = SMOTE(k_neighbors=2)
-        over_x, over_y = oversampler.fit_resample(need_oversampling.drop(columns=[self.target_feature], inplace=False), need_oversampling[self.target_feature])
+        over_x, over_y = oversampler.fit_resample(df.drop(columns=[self.target_feature], inplace=False), df[self.target_feature])
         over_x[self.target_feature] = over_y
-        new_df = pd.concat([under_x, over_x])
+
         print("over x value counts", over_x[self.target_feature].value_counts())
-        print("Number of rows after resampling: ", len(new_df))
+        print("Number of rows after resampling: ", len(over_x))
 
         plt.figure(figsize=(10, 5))
-        pd.Series(new_df[self.target_feature]).value_counts()[:10].plot(kind='bar', color=['blue', 'orange'])
-        plt.title('Top 10 Conditions After Balancing')
-        plt.xlabel('Condition')
-        plt.xticks(rotation=35)
+        pd.Series(over_x[self.target_feature]).value_counts().plot(kind='bar')
+        plt.title('Rating After Balancing')
+        plt.xlabel('Rating')
+        # plt.xticks(rotation=35)
         plt.ylabel('Count')
         plt.grid(True)
         plt.show()
-        return new_df
+        return over_x
 
     def anomaly_detection(self, df):
         model = hdbscan.HDBSCAN(min_cluster_size=4)
@@ -474,19 +411,13 @@ class eda:
         filtered_df = self.train_df[df["Cluster"] != -1]
         print(f"Original shape: {df.shape}")
 
-        filtered_df.drop(columns=["Cluster"])
-        print(f"Filtered shape: {self.train_df.shape}")
+        print(f"Filtered shape: {filtered_df.shape}")
         return filtered_df
 
 
 if __name__ == "__main__":
-    # nltk.download('omw-1.4')
-    # nltk.download('wordnet')
-    # nltk.download('vader_lexicon')
+    nltk.download('omw-1.4')
+    nltk.download('wordnet')
+    nltk.download('vader_lexicon')
     obj = eda()
-    # 50 for dims
-    # TODO after data is done processing do anamoly, resample, vif, random forest, pca, covar, corr
-    # TODO regression
-    # TODO classifiers
-    # obj.random_forest("rating")
 

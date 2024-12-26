@@ -1,14 +1,13 @@
 import pandas as pd
 from prettytable import PrettyTable
 from sklearn.linear_model import LinearRegression
-from scipy.stats import linregress
 import matplotlib.pyplot as plt
 import numpy as np
 import statsmodels.api as sm
- # lecture 8
+
 class RegressionAnalysis():
-    train_filepath = "data/filtered/train_data_filtered_rating.csv"
-    test_filepath = "data/filtered/test_data_filtered_rating.csv"
+    train_filepath = "data/filtered/train_data_filtered_useful.csv"
+    test_filepath = "data/filtered/test_data_filtered_useful.csv"
     def __init__(self):
         self.get_processed_data()
 
@@ -23,26 +22,30 @@ class RegressionAnalysis():
         self.confidence_interval_analysis(elim_features)
 
     def regression_analysis(self, eliminated_features):
-        train_data = self.train_df.copy().sort_values(by=['rating'])
-        x_train = train_data.drop(columns=["rating", *eliminated_features])
-        y_train = train_data["rating"]
-        test_data = self.test_df.copy().sort_values(by=['rating'])
-        x_test = test_data.drop(columns=["rating", *eliminated_features])
-        y_test = test_data["rating"]
+        train_data = self.train_df.copy().sort_values(by=['usefulStandardized'])
+        x_train = train_data.drop(columns=["usefulStandardized", *eliminated_features])
+        y_train = train_data["usefulStandardized"]
+        test_data = self.test_df.copy().sort_values(by=['usefulStandardized'])
+        x_test = test_data.drop(columns=["usefulStandardized", *eliminated_features])
+        y_test = test_data["usefulStandardized"]
         model = LinearRegression()
         model.fit(x_train, y_train)
         print(model.coef_)
         y_pred = model.predict(x_test)
         y_true = y_test
-        train_indices = np.arange(len(y_train))
-        test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
+        subset_df = y_true[y_true > 1]
+
+        print(subset_df)
+
+        train_indices = np.arange(len(train_data))
+        test_indices = np.arange(len(train_data), len(train_data) + len(test_data))
         plt.scatter(train_indices, y_train, label="Training Data")
         print(len(y_true), len(test_indices))
         plt.scatter(test_indices, y_pred, label="Test Predictions")
         plt.scatter(test_indices, y_true, label="Test Results")
         plt.title("Train, Test, and Predicted Values")
         plt.xlabel("Data Points")
-        plt.ylabel("Rating")
+        plt.ylabel("usefulStandardized")
         plt.legend()
         plt.grid(True)
         plt.show()
@@ -53,10 +56,9 @@ class RegressionAnalysis():
         t_table = PrettyTable()
         t_table.title = "T-test Analysis (alpha=0.05)"
         t_table.field_names = ["Feature", "t statistic", "p value", "Rejected?"]
-        features = self.test_df.drop(columns=["rating"], inplace=False).columns
 
-        x_train = self.train_df.drop(columns=["rating"])
-        y_train = self.train_df["rating"]
+        x_train = self.train_df.drop(columns=["usefulStandardized"])
+        y_train = self.train_df["usefulStandardized"]
         model = sm.OLS(y_train, x_train).fit()
         p_values = model.pvalues
         t_stats = model.tvalues
@@ -70,23 +72,8 @@ class RegressionAnalysis():
             t_table.add_row([f"{val}", f"{t_val:.3f}", f"{p_val:.3f}", f"{isRejected}"])
         print(t_table)
 
-
-
-        #
-        # for feature in features:
-        #     feature_mean = np.mean(self.test_df[feature])
-        #     test_result = linregress(self.test_df[feature], self.test_df["rating"])
-        #     t_val = test_result.slope / ((test_result.stderr**2)/ np.sqrt(np.sum((self.test_df[feature] - feature_mean)**2)))
-        #     p_val = test_result.pvalue
-        #     if p_val > sig:
-        #         isRejected="No"
-        #     else:
-        #         isRejected="Yes"
-        #     t_table.add_row([f"{feature}", f"{t_val:.3f}", f"{p_val}", f"{isRejected}"])
-        # print(t_table)
-
     def f_test_analysis(self, eliminated_features):
-        x_train = self.train_df.drop(columns=["rating", *eliminated_features])
+        x_train = self.train_df.drop(columns=["usefulStandardized", *eliminated_features])
         y_train = self.train_df["rating"]
         model = sm.OLS(y_train, x_train).fit()
         print("F-statistic:", model.fvalue)
@@ -94,9 +81,9 @@ class RegressionAnalysis():
 
 
     def confidence_interval_analysis(self, eliminated_features):
-        x_train = self.train_df.drop(columns=["rating", *eliminated_features])
-        x_test = self.test_df.drop(columns=["rating", *eliminated_features])
-        y_train = self.train_df["rating"]
+        x_train = self.train_df.drop(columns=["usefulStandardized", *eliminated_features])
+        x_test = self.test_df.drop(columns=["usefulStandardized", *eliminated_features])
+        y_train = self.train_df["usefulStandardized"]
         model = sm.OLS(y_train, x_train).fit()
         predictions = model.get_prediction(x_test)
         pred_mean = predictions.predicted_mean
@@ -105,19 +92,19 @@ class RegressionAnalysis():
         upper_bound = summary_frame["mean_ci_upper"]
 
         plt.fill_between(range(len(pred_mean)), lower_bound, upper_bound, color="blue", label="CI", alpha=.3)
-        plt.scatter(range(len(pred_mean)), pred_mean, color="red", label="Predicted Rating", s=.3)
+        plt.scatter(range(len(pred_mean)), pred_mean, color="red", label="Predicted usefulStandardized", s=.3)
 
         plt.xlabel('# of Samples')
-        plt.ylabel('Rating')
-        plt.title('Rating Prediction with Confidence Interval')
+        plt.ylabel('usefulStandardized')
+        plt.title('usefulStandardized Prediction with Confidence Interval')
         plt.legend()
         plt.grid(True)
         plt.show()
 
     def stepwise_regression(self):
         threshold = 0.05
-        x_train = self.train_df.drop(columns=["rating"], inplace=False)
-        y_train = self.train_df["rating"]
+        x_train = self.train_df.drop(columns=["usefulStandardized"], inplace=False)
+        y_train = self.train_df["usefulStandardized"]
         x_train = sm.add_constant(x_train)
         mse_list = []
         aic_list = []
@@ -173,4 +160,3 @@ class RegressionAnalysis():
 
 if __name__ == "__main__":
     obj = RegressionAnalysis()
-    # obj.random_forest("rating")

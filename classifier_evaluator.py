@@ -1,6 +1,6 @@
 from prettytable import PrettyTable
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_curve, roc_auc_score, ConfusionMatrixDisplay, \
-    confusion_matrix
+    confusion_matrix, accuracy_score
 import matplotlib.pyplot as plt
 
 
@@ -24,12 +24,14 @@ class ClassifierEvaluator:
     def display_result(self, y_pred, y_true, type):
         result_table = PrettyTable()
         result_table.title = f"{type} Classifier Results"
-        result_table.field_names = ["Type", "Precision", "Recall", "Specificity", "F-score"]
+        result_table.field_names = ["Type", "Precision", "Recall", "Specificity", "F-score", "Accuracy"]
         precision = precision_score(y_true, y_pred)
         recall = recall_score(y_true, y_pred)
         specificity = recall_score(y_true, y_pred, pos_label=0)
         f1 = f1_score(y_true,y_pred)
-        result_table.add_row([f"{type}", f"{precision}", f"{recall}", f"{specificity}", f"{f1}"])
+        accuracy = accuracy_score(y_true, y_pred)
+        result_table.add_row([f"{type}", f"{precision}", f"{recall}", f"{specificity}", f"{f1}", f"{accuracy}"])
+        print(result_table)
 
 
     def display_roc_and_auc(self, y_true, y_prob, type):
